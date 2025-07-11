@@ -1,0 +1,51 @@
+<?php
+if (isset($_SESSION['quiz_master_result'])) {
+    $result = $_SESSION['quiz_master_result'];
+    unset($_SESSION['quiz_master_result']);
+    ?>
+    <div class="quiz-result-container">
+        <h2><?php _e('Quiz Results', 'quiz-master'); ?></h2>
+        
+        <div class="result-summary <?php echo $result['passed'] ? 'passed' : 'failed'; ?>">
+            <p>
+                <?php 
+                printf(
+                    __('You scored %d out of %d (%d%%).', 'quiz-master'),
+                    $result['score'],
+                    $result['total'],
+                    round(($result['score'] / $result['total']) * 100)
+                );
+                ?>
+            </p>
+            <p>
+                <?php 
+                echo $result['passed'] 
+                    ? __('Congratulations! You passed.', 'quiz-master')
+                    : sprintf(__('You needed %d%% to pass.', 'quiz-master'), $result['pass_mark']);
+                ?>
+            </p>
+        </div>
+        
+        <div class="result-details">
+            <h3><?php _e('Question Breakdown', 'quiz-master'); ?></h3>
+            
+            <?php foreach ($result['results'] as $item): ?>
+            <div class="result-item <?php echo $item['is_correct'] ? 'correct' : 'incorrect'; ?>">
+                <h4><?php echo esc_html($item['question_text']); ?></h4>
+                <p>
+                    <strong><?php _e('Your answer:', 'quiz-master'); ?></strong>
+                    <?php echo $this->format_user_answer($item['user_answers'], $item['question_id']); ?>
+                </p>
+                <?php if (!$item['is_correct']): ?>
+                <p>
+                    <strong><?php _e('Correct answer:', 'quiz-master'); ?></strong>
+                    <?php echo $this->format_correct_answer($item['correct_answers'], $item['question_id']); ?>
+                </p>
+                <?php endif; ?>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+    <?php
+}
+?>

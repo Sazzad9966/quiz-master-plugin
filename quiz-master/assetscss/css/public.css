@@ -1,0 +1,109 @@
+/* Quiz Master Frontend Styles */
+.quiz-master-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+    background: #fff;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, sans-serif;
+}
+
+.quiz-header {
+    margin-bottom: 30px;
+    text-align: center;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 20px;
+}
+
+.quiz-timer {
+    font-size: 24px;
+    font-weight: bold;
+    color: #d9534f;
+    margin: 10px 0;
+    text-align: center;
+}
+
+.quiz-question {
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #eee;
+}
+
+.quiz-question h3 {
+    margin-bottom: 15px;
+    color: #333;
+}
+
+.quiz-answer {
+    margin: 10px 0;
+    padding: 10px;
+    background: #f9f9f9;
+    border-radius: 3px;
+}
+
+.quiz-answer input[type="radio"],
+.quiz-answer input[type="checkbox"] {
+    margin-right: 10px;
+}
+
+.quiz-actions {
+    text-align: center;
+    margin-top: 30px;
+}
+
+.quiz-submit {
+    padding: 10px 30px;
+    background: #5cb85c;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.quiz-submit:hover {
+    background: #4cae4c;
+}
+
+/* Results Page Styles */
+.quiz-result-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+    background: #fff;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+.result-summary {
+    padding: 20px;
+    margin-bottom: 30px;
+    text-align: center;
+    border-radius: 4px;
+}
+
+.result-summary.passed {
+    background: #dff0d8;
+    color: #3c763d;
+}
+
+.result-summary.failed {
+    background: #f2dede;
+    color: #a94442;
+}
+
+.result-item {
+    padding: 15px;
+    margin-bottom: 15px;
+    border-left: 4px solid;
+}
+
+.result-item.correct {
+    border-left-color: #5cb85c;
+    background: #f9f9f9;
+}
+
+.result-item.incorrect {
+    border-left-color: #d9534f;
+    background: #f9f9f9;
+}

@@ -1,0 +1,80 @@
+class Quiz_Master_Timer {
+    public function __construct() {
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_timer_scripts'));
+        add_action('wp_footer', array($this, 'add_tab_lock_script'));
+    }
+    
+    public function enqueue_timer_scripts() {
+        if (has_shortcode(get_post()->post_content, 'quiz_master')) {
+            wp_enqueue_script('quiz-master-timer', QUIZ_MASTER_PLUGIN_URL . 'assets/js/timer.js', array('jquery'), QUIZ_MASTER_VERSION, true);
+        }
+    }
+    
+    public function add_tab_lock_script() {
+        if (has_shortcode(get_post()->post_content, 'quiz_master')) {
+            ?>
+            <script>
+            (function($) {
+                // Tab/window close prevention
+                var quizInProgress = false;
+                
+                $(document).on('quiz_started', function() {
+                    quizInProgress = true;
+                });
+                
+                $(document).on('quiz_ended', function() {
+                    quizInProgress = false;
+                });
+                
+                window.addEventListener('beforeunload', function(e) {
+                    if (quizInProgress) {
+                        e.preventDefault();
+                        e.returnValue = quizMasterPublic.tabCloseWarning;
+                        return e.returnValue;
+                    }
+                });
+                
+                // Timer functionality
+                function startTimer(duration, display, callback) {
+                    var timer = duration, minutes, seconds;
+                    
+                    var interval = setInterval(function() {
+                        minutes = parseInt(timer / 60, 10);
+                        seconds = parseInt(timer % 60, 10);
+                        
+                        minutes = minutes < 10 ? "0" + minutes : minutes;
+                        seconds = seconds < 10 ? "0" + seconds : seconds;
+                        
+                        display.text(minutes + ":" + seconds);
+                        
+                        if (--timer < 0) {
+                            clearInterval(interval);
+                            if (typeof callback === 'function') {
+                                callback();
+                            }
+                        }
+                    }, 1000);
+                    
+                    return interval;
+                }
+                
+                $(document).on('quiz_initialize', function(e, quizData) {
+                    var $timerDisplay = $('#quiz-timer');
+                    var timeLimit = quizData.time_limit * 60; // Convert minutes to seconds
+                    
+                    var timerInterval = startTimer(timeLimit, $timerDisplay, function() {
+                        // Time's up - submit the quiz
+                        $(document).trigger('quiz_time_expired');
+                        $('#quiz-master-form').submit();
+                    });
+                    
+                    $(document).on('quiz_ended', function() {
+                        clearInterval(timerInterval);
+                    });
+                });
+            })(jQuery);
+            </script>
+            <?php
+        }
+    }
+}

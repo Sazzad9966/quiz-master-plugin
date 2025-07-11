@@ -1,0 +1,74 @@
+// In includes/class-quiz-db.php
+class Quiz_DB {
+    public function create_tables() {
+        global $wpdb;
+        
+        $charset_collate = $wpdb->get_charset_collate();
+        
+        // Quizzes table
+        $quizzes_table = $wpdb->prefix . 'quiz_master_quizzes';
+        $sql = "CREATE TABLE $quizzes_table (
+            quiz_id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            time_limit INT(11) DEFAULT 0,
+            pass_mark INT(11) DEFAULT 0,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (quiz_id)
+        ) $charset_collate;";
+        
+        // Questions table
+        $questions_table = $wpdb->prefix . 'quiz_master_questions';
+        $sql .= "CREATE TABLE $questions_table (
+            question_id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            quiz_id BIGINT(20) UNSIGNED NOT NULL,
+            question_text TEXT NOT NULL,
+            question_order INT(11) DEFAULT 0,
+            PRIMARY KEY (question_id),
+            FOREIGN KEY (quiz_id) REFERENCES $quizzes_table(quiz_id) ON DELETE CASCADE
+        ) $charset_collate;";
+        
+        // Answers table
+        $answers_table = $wpdb->prefix . 'quiz_master_answers';
+        $sql .= "CREATE TABLE $answers_table (
+            answer_id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            question_id BIGINT(20) UNSIGNED NOT NULL,
+            answer_text TEXT NOT NULL,
+            is_correct TINYINT(1) DEFAULT 0,
+            answer_order INT(11) DEFAULT 0,
+            PRIMARY KEY (answer_id),
+            FOREIGN KEY (question_id) REFERENCES $questions_table(question_id) ON DELETE CASCADE
+        ) $charset_collate;";
+        
+        // Results table
+        $results_table = $wpdb->prefix . 'quiz_master_results';
+        $sql .= "CREATE TABLE $results_table (
+            result_id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            quiz_id BIGINT(20) UNSIGNED NOT NULL,
+            user_id BIGINT(20) UNSIGNED DEFAULT NULL,
+            user_ip VARCHAR(45) NOT NULL,
+            score INT(11) NOT NULL,
+            total_questions INT(11) NOT NULL,
+            start_time DATETIME NOT NULL,
+            end_time DATETIME NOT NULL,
+            status VARCHAR(20) DEFAULT 'completed',
+            PRIMARY KEY (result_id),
+            FOREIGN KEY (quiz_id) REFERENCES $quizzes_table(quiz_id) ON DELETE CASCADE
+        ) $charset_collate;";
+        
+        // Blocked IPs table
+        $blocked_table = $wpdb->prefix . 'quiz_master_blocked_ips';
+        $sql .= "CREATE TABLE $blocked_table (
+            block_id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            ip_address VARCHAR(45) NOT NULL,
+            reason VARCHAR(255) DEFAULT NULL,
+            blocked_until DATETIME NOT NULL,
+            blocked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (block_id),
+            UNIQUE KEY ip_address (ip_address)
+        ) $charset_collate;";
+        
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+        dbDelta($sql);
+    }
+}

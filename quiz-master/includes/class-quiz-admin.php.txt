@@ -1,0 +1,255 @@
+class Quiz_Master_Admin {
+    public function __construct() {
+        add_action('admin_menu', array($this, 'add_admin_menu'));
+        add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
+        add_action('wp_ajax_quiz_master_save_quiz', array($this, 'save_quiz'));
+        add_action('wp_ajax_quiz_master_delete_quiz', array($this, 'delete_quiz'));
+        add_action('wp_ajax_quiz_master_get_quiz_data', array($this, 'get_quiz_data'));
+    }
+    
+    public function add_admin_menu() {
+        add_menu_page(
+            __('Quiz Master', 'quiz-master'),
+            __('Quiz Master', 'quiz-master'),
+            'manage_options',
+            'quiz-master',
+            array($this, 'render_admin_page'),
+            'dashicons-clipboard'
+        );
+        
+        add_submenu_page(
+            'quiz-master',
+            __('Add New Quiz', 'quiz-master'),
+            __('Add New', 'quiz-master'),
+            'manage_options',
+            'quiz-master-add',
+            array($this, 'render_add_quiz_page')
+        );
+        
+        add_submenu_page(
+            'quiz-master',
+            __('Results', 'quiz-master'),
+            __('Results', 'quiz-master'),
+            'manage_options',
+            'quiz-master-results',
+            array($this, 'render_results_page')
+        );
+        
+        add_submenu_page(
+            'quiz-master',
+            __('Blocked IPs', 'quiz-master'),
+            __('Blocked IPs', 'quiz-master'),
+            'manage_options',
+            'quiz-master-blocked',
+            array($this, 'render_blocked_ips_page')
+        );
+    }
+    
+    public function enqueue_admin_assets($hook) {
+        if (strpos($hook, 'quiz-master') !== false) {
+            wp_enqueue_style('quiz-master-admin', QUIZ_MASTER_PLUGIN_URL . 'assets/css/admin.css');
+            wp_enqueue_script('quiz-master-admin', QUIZ_MASTER_PLUGIN_URL . 'assets/js/admin.js', array('jquery', 'wp-util'), QUIZ_MASTER_VERSION, true);
+            
+            wp_localize_script('quiz-master-admin', 'quizMasterAdmin', array(
+                'ajaxUrl' => admin_url('admin-ajax.php'),
+                'nonce' => wp_create_nonce('quiz_master_nonce'),
+                'confirmDelete' => __('Are you sure you want to delete this quiz?', 'quiz-master')
+            ));
+        }
+    }
+    
+    public function render_admin_page() {
+        include QUIZ_MASTER_PLUGIN_DIR . 'templates/admin/quizzes-list.php';
+    }
+    
+    public function render_add_quiz_page() {
+        include QUIZ_MASTER_PLUGIN_DIR . 'templates/admin/quiz-edit.php';
+    }
+    
+    public function render_results_page() {
+        include QUIZ_MASTER_PLUGIN_DIR . 'templates/admin/results.php';
+    }
+    
+    public function render_blocked_ips_page() {
+        include QUIZ_MASTER_PLUGIN_DIR . 'templates/admin/blocked-ips.php';
+    }
+    
+    public function save_quiz() {
+        check_ajax_referer('quiz_master_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('You do not have permission to perform this action.', 'quiz-master'));
+        }
+        
+        $data = $_POST['data'];
+        $quiz_id = isset($data['quiz_id']) ? intval($data['quiz_id']) : 0;
+        
+        $quiz_data = array(
+            'title' => sanitize_text_field($data['title']),
+            'description' => wp_kses_post($data['description']),
+            'time_limit' => intval($data['time_limit']),
+            'pass_mark' => intval($data['pass_mark'])
+        );
+        
+        global $wpdb;
+        $quizzes_table = $wpdb->prefix . 'quiz_master_quizzes';
+        
+        if ($quiz_id > 0) {
+            $wpdb->update($quizzes_table, $quiz_data, array('quiz_id' => $quiz_id));
+        } else {
+            $wpdb->insert($quizzes_table, $quiz_data);
+            $quiz_id = $wpdb->insert_id;
+        }
+        
+        // Save questions and answers
+        $this->save_questions($quiz_id, $data['questions']);
+        
+        wp_send_json_success(array(
+            'quiz_id' => $quiz_id,
+            'message' => __('Quiz saved successfully.', 'quiz-master')
+        ));
+    }
+    
+    private function save_questions($quiz_id, $questions) {
+        global $wpdb;
+        $questions_table = $wpdb->prefix . 'quiz_master_questions';
+        $answers_table = $wpdb->prefix . 'quiz_master_answers';
+        
+        // First get existing questions to know which to delete
+        $existing_questions = $wpdb->get_col($wpdb->prepare(
+            "SELECT question_id FROM $questions_table WHERE quiz_id = %d", $quiz_id
+        ));
+        
+        $current_question_ids = array();
+        
+        foreach ($questions as $question) {
+            $question_data = array(
+                'quiz_id' => $quiz_id,
+                'question_text' => wp_kses_post($question['text']),
+                'question_order' => intval($question['order'])
+            );
+            
+            $question_id = isset($question['id']) ? intval($question['id']) : 0;
+            
+            if ($question_id > 0) {
+                $wpdb->update($questions_table, $question_data, array('question_id' => $question_id));
+                $current_question_ids[] = $question_id;
+            } else {
+                $wpdb->insert($questions_table, $question_data);
+                $question_id = $wpdb->insert_id;
+                $current_question_ids[] = $question_id;
+            }
+            
+            // Save answers
+            $this->save_answers($question_id, $question['answers']);
+        }
+        
+        // Delete questions that were removed
+        $to_delete = array_diff($existing_questions, $current_question_ids);
+        if (!empty($to_delete)) {
+            $wpdb->query($wpdb->prepare(
+                "DELETE FROM $questions_table WHERE question_id IN (" . implode(',', $to_delete) . ")"
+            ));
+        }
+    }
+    
+    private function save_answers($question_id, $answers) {
+        global $wpdb;
+        $answers_table = $wpdb->prefix . 'quiz_master_answers';
+        
+        $existing_answers = $wpdb->get_col($wpdb->prepare(
+            "SELECT answer_id FROM $answers_table WHERE question_id = %d", $question_id
+        ));
+        
+        $current_answer_ids = array();
+        
+        foreach ($answers as $answer) {
+            $answer_data = array(
+                'question_id' => $question_id,
+                'answer_text' => sanitize_text_field($answer['text']),
+                'is_correct' => isset($answer['is_correct']) ? 1 : 0,
+                'answer_order' => intval($answer['order'])
+            );
+            
+            $answer_id = isset($answer['id']) ? intval($answer['id']) : 0;
+            
+            if ($answer_id > 0) {
+                $wpdb->update($answers_table, $answer_data, array('answer_id' => $answer_id));
+                $current_answer_ids[] = $answer_id;
+            } else {
+                $wpdb->insert($answers_table, $answer_data);
+                $current_answer_ids[] = $wpdb->insert_id;
+            }
+        }
+        
+        // Delete answers that were removed
+        $to_delete = array_diff($existing_answers, $current_answer_ids);
+        if (!empty($to_delete)) {
+            $wpdb->query($wpdb->prepare(
+                "DELETE FROM $answers_table WHERE answer_id IN (" . implode(',', $to_delete) . ")"
+            ));
+        }
+    }
+    
+    public function delete_quiz() {
+        check_ajax_referer('quiz_master_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('You do not have permission to perform this action.', 'quiz-master'));
+        }
+        
+        $quiz_id = isset($_POST['quiz_id']) ? intval($_POST['quiz_id']) : 0;
+        
+        if ($quiz_id > 0) {
+            global $wpdb;
+            $quizzes_table = $wpdb->prefix . 'quiz_master_quizzes';
+            $wpdb->delete($quizzes_table, array('quiz_id' => $quiz_id));
+            
+            wp_send_json_success(__('Quiz deleted successfully.', 'quiz-master'));
+        }
+        
+        wp_send_json_error(__('Invalid quiz ID.', 'quiz-master'));
+    }
+    
+    public function get_quiz_data() {
+        check_ajax_referer('quiz_master_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('You do not have permission to perform this action.', 'quiz-master'));
+        }
+        
+        $quiz_id = isset($_POST['quiz_id']) ? intval($_POST['quiz_id']) : 0;
+        
+        if ($quiz_id > 0) {
+            global $wpdb;
+            
+            $quizzes_table = $wpdb->prefix . 'quiz_master_quizzes';
+            $questions_table = $wpdb->prefix . 'quiz_master_questions';
+            $answers_table = $wpdb->prefix . 'quiz_master_answers';
+            
+            $quiz = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM $quizzes_table WHERE quiz_id = %d", $quiz_id
+            ), ARRAY_A);
+            
+            if ($quiz) {
+                $quiz['questions'] = array();
+                
+                $questions = $wpdb->get_results($wpdb->prepare(
+                    "SELECT * FROM $questions_table WHERE quiz_id = %d ORDER BY question_order ASC", $quiz_id
+                ), ARRAY_A);
+                
+                foreach ($questions as $question) {
+                    $question['answers'] = $wpdb->get_results($wpdb->prepare(
+                        "SELECT * FROM $answers_table WHERE question_id = %d ORDER BY answer_order ASC", $question['question_id']
+                    ), ARRAY_A);
+                    
+                    $quiz['questions'][] = $question;
+                }
+                
+                wp_send_json_success($quiz);
+            }
+        }
+        
+        wp_send_json_error(__('Quiz not found.', 'quiz-master'));
+    }
+}

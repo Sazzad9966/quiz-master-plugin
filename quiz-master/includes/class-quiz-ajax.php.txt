@@ -1,0 +1,95 @@
+class Quiz_Master_Ajax {
+    public function __construct() {
+        add_action('wp_ajax_quiz_master_start_quiz', array($this, 'start_quiz'));
+        add_action('wp_ajax_nopriv_quiz_master_start_quiz', array($this, 'start_quiz'));
+        add_action('wp_ajax_quiz_master_save_answer', array($this, 'save_answer'));
+        add_action('wp_ajax_nopriv_quiz_master_save_answer', array($this, 'save_answer'));
+    }
+    
+    public function start_quiz() {
+        check_ajax_referer('quiz_master_nonce', 'nonce');
+        
+        $quiz_id = isset($_POST['quiz_id']) ? intval($_POST['quiz_id']) : 0;
+        
+        if ($quiz_id <= 0) {
+            wp_send_json_error(__('Invalid quiz ID.', 'quiz-master'));
+        }
+        
+        global $wpdb;
+        $quizzes_table = $wpdb->prefix . 'quiz_master_quizzes';
+        $results_table = $wpdb->prefix . 'quiz_master_results';
+        
+        $quiz = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $quizzes_table WHERE quiz_id = %d", $quiz_id
+        ));
+        
+        if (!$quiz) {
+            wp_send_json_error(__('Quiz not found.', 'quiz-master'));
+        }
+        
+        // Check if user already has an active attempt
+        $user_id = is_user_logged_in() ? get_current_user_id() : null;
+        $user_ip = $this->get_user_ip();
+        
+        $active_attempt = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $results_table 
+            WHERE quiz_id = %d AND (user_id = %d OR user_ip = %s) 
+            AND status = 'in_progress'", 
+            $quiz_id, $user_id, $user_ip
+        ));
+        
+        if ($active_attempt) {
+            wp_send_json_success(array(
+                'status' => 'resume',
+                'start_time' => $active_attempt->start_time,
+                'quiz_data' => $quiz
+            ));
+        } else {
+            // Create new attempt
+            $wpdb->insert($results_table, array(
+                'quiz_id' => $quiz_id,
+                'user_id' => $user_id,
+                'user_ip' => $user_ip,
+                'score' => 0,
+                'total_questions' => 0,
+                'start_time' => current_time('mysql'),
+                'status' => 'in_progress'
+            ));
+            
+            wp_send_json_success(array(
+                'status' => 'new',
+                'start_time' => current_time('mysql'),
+                'quiz_data' => $quiz
+            ));
+        }
+    }
+    
+    public function save_answer() {
+        check_ajax_referer('quiz_master_nonce', 'nonce');
+        
+        $quiz_id = isset($_POST['quiz_id']) ? intval($_POST['quiz_id']) : 0;
+        $question_id = isset($_POST['question_id']) ? intval($_POST['question_id']) : 0;
+        $answer_ids = isset($_POST['answer_ids']) ? array_map('intval', $_POST['answer_ids']) : array();
+        
+        if ($quiz_id <= 0 || $question_id <= 0) {
+            wp_send_json_error(__('Invalid data.', 'quiz-master'));
+        }
+        
+        // In a real implementation, you would save the answer to the database
+        // For this example, we'll just return success
+        
+        wp_send_json_success(array(
+            'message' => __('Answer saved.', 'quiz-master')
+        ));
+    }
+    
+    private function get_user_ip() {
+        if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
+            return $_SERVER['HTTP_CLIENT_IP'];
+        } elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            return $_SERVER['HTTP_X_FORWARDED_FOR'];
+        } else {
+            return $_SERVER['REMOTE_ADDR'];
+        }
+    }
+}

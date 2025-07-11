@@ -1,0 +1,255 @@
+class Quiz_Master_Public {
+    public function __construct() {
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_public_assets'));
+        add_shortcode('quiz_master', array($this, 'quiz_shortcode'));
+        add_action('template_redirect', array($this, 'handle_quiz_submission'));
+    }
+    
+    public function enqueue_public_assets() {
+        wp_enqueue_style('quiz-master-public', QUIZ_MASTER_PLUGIN_URL . 'assets/css/public.css');
+        wp_enqueue_script('quiz-master-public', QUIZ_MASTER_PLUGIN_URL . 'assets/js/public.js', array('jquery'), QUIZ_MASTER_VERSION, true);
+        wp_enqueue_script('quiz-master-timer', QUIZ_MASTER_PLUGIN_URL . 'assets/js/timer.js', array('jquery'), QUIZ_MASTER_VERSION, true);
+        
+        wp_localize_script('quiz-master-public', 'quizMasterPublic', array(
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('quiz_master_nonce'),
+            'tabCloseWarning' => __('You cannot close this tab or window while the quiz is in progress.', 'quiz-master'),
+            'timeExpiredMessage' => __('Time is up! The quiz will be submitted automatically.', 'quiz-master')
+        ));
+    }
+    
+    public function quiz_shortcode($atts) {
+        $atts = shortcode_atts(array(
+            'id' => 0
+        ), $atts);
+        
+        $quiz_id = intval($atts['id']);
+        
+        if ($quiz_id <= 0) {
+            return __('Invalid quiz ID.', 'quiz-master');
+        }
+        
+        // Check if user is blocked
+        $ip = $this->get_user_ip();
+        if ($this->is_ip_blocked($ip)) {
+            return __('You are temporarily blocked from taking quizzes. Please try again later.', 'quiz-master');
+        }
+        
+        // Check if user has failed this quiz twice already
+        if ($this->has_failed_twice($quiz_id, $ip)) {
+            $this->block_ip($ip, 'Failed quiz twice');
+            return __('You have failed this quiz twice and are now blocked for 24 hours.', 'quiz-master');
+        }
+        
+        global $wpdb;
+        $quizzes_table = $wpdb->prefix . 'quiz_master_quizzes';
+        $questions_table = $wpdb->prefix . 'quiz_master_questions';
+        $answers_table = $wpdb->prefix . 'quiz_master_answers';
+        
+        $quiz = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $quizzes_table WHERE quiz_id = %d", $quiz_id
+        ));
+        
+        if (!$quiz) {
+            return __('Quiz not found.', 'quiz-master');
+        }
+        
+        $questions = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM $questions_table WHERE quiz_id = %d ORDER BY question_order ASC", $quiz_id
+        ));
+        
+        if (empty($questions)) {
+            return __('No questions found for this quiz.', 'quiz-master');
+        }
+        
+        // Prepare questions with answers
+        foreach ($questions as &$question) {
+            $question->answers = $wpdb->get_results($wpdb->prepare(
+                "SELECT answer_id, answer_text, answer_order FROM $answers_table 
+                WHERE question_id = %d ORDER BY answer_order ASC", $question->question_id
+            ));
+        }
+        
+        ob_start();
+        include QUIZ_MASTER_PLUGIN_DIR . 'templates/quiz-form.php';
+        return ob_get_clean();
+    }
+    
+    public function handle_quiz_submission() {
+        if (isset($_POST['quiz_master_submit'])) {
+            $quiz_id = isset($_POST['quiz_id']) ? intval($_POST['quiz_id']) : 0;
+            $user_ip = $this->get_user_ip();
+            
+            // Verify nonce
+            if (!isset($_POST['quiz_master_nonce']) || !wp_verify_nonce($_POST['quiz_master_nonce'], 'quiz_master_nonce')) {
+                wp_die(__('Security check failed.', 'quiz-master'));
+            }
+            
+            // Check if IP is blocked
+            if ($this->is_ip_blocked($user_ip)) {
+                wp_die(__('You are blocked from taking quizzes.', 'quiz-master'));
+            }
+            
+            global $wpdb;
+            $quizzes_table = $wpdb->prefix . 'quiz_master_quizzes';
+            $questions_table = $wpdb->prefix . 'quiz_master_questions';
+            $answers_table = $wpdb->prefix . 'quiz_master_answers';
+            $results_table = $wpdb->prefix . 'quiz_master_results';
+            
+            $quiz = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM $quizzes_table WHERE quiz_id = %d", $quiz_id
+            ));
+            
+            if (!$quiz) {
+                wp_die(__('Invalid quiz.', 'quiz-master'));
+            }
+            
+            $questions = $wpdb->get_results($wpdb->prepare(
+                "SELECT q.question_id, q.question_text, a.answer_id, a.answer_text, a.is_correct 
+                FROM $questions_table q
+                LEFT JOIN $answers_table a ON q.question_id = a.question_id
+                WHERE q.quiz_id = %d", $quiz_id
+            ));
+            
+            // Organize questions and correct answers
+            $correct_answers = array();
+            $total_questions = 0;
+            
+            foreach ($questions as $question) {
+                if (!isset($correct_answers[$question->question_id])) {
+                    $correct_answers[$question->question_id] = array(
+                        'text' => $question->question_text,
+                        'correct' => array()
+                    );
+                    $total_questions++;
+                }
+                
+                if ($question->is_correct) {
+                    $correct_answers[$question->question_id]['correct'][] = $question->answer_id;
+                }
+            }
+            
+            // Calculate score
+            $score = 0;
+            $user_answers = isset($_POST['answers']) ? $_POST['answers'] : array();
+            $results = array();
+            
+            foreach ($correct_answers as $question_id => $data) {
+                $user_answer = isset($user_answers[$question_id]) ? $user_answers[$question_id] : array();
+                
+                if (!is_array($user_answer)) {
+                    $user_answer = array($user_answer);
+                }
+                
+                $user_answer = array_map('intval', $user_answer);
+                $correct = array_map('intval', $data['correct']);
+                
+                sort($user_answer);
+                sort($correct);
+                
+                $is_correct = ($user_answer === $correct);
+                
+                if ($is_correct) {
+                    $score++;
+                }
+                
+                $results[] = array(
+                    'question_id' => $question_id,
+                    'question_text' => $data['text'],
+                    'user_answers' => $user_answer,
+                    'correct_answers' => $correct,
+                    'is_correct' => $is_correct
+                );
+            }
+            
+            // Save result
+            $user_id = is_user_logged_in() ? get_current_user_id() : null;
+            
+            $wpdb->insert($results_table, array(
+                'quiz_id' => $quiz_id,
+                'user_id' => $user_id,
+                'user_ip' => $user_ip,
+                'score' => $score,
+                'total_questions' => $total_questions,
+                'start_time' => isset($_POST['start_time']) ? sanitize_text_field($_POST['start_time']) : current_time('mysql'),
+                'end_time' => current_time('mysql'),
+                'status' => 'completed'
+            ));
+            
+            $result_id = $wpdb->insert_id;
+            
+            // Check if user passed
+            $passed = ($score >= $quiz->pass_mark);
+            
+            // Store results in session to display
+            $_SESSION['quiz_master_result'] = array(
+                'quiz_id' => $quiz_id,
+                'score' => $score,
+                'total' => $total_questions,
+                'passed' => $passed,
+                'pass_mark' => $quiz->pass_mark,
+                'results' => $results
+            );
+            
+            // Redirect to prevent form resubmission
+            wp_redirect(add_query_arg('quiz_result', $result_id));
+            exit;
+        }
+    }
+    
+    private function get_user_ip() {
+        if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
+            return $_SERVER['HTTP_CLIENT_IP'];
+        } elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            return $_SERVER['HTTP_X_FORWARDED_FOR'];
+        } else {
+            return $_SERVER['REMOTE_ADDR'];
+        }
+    }
+    
+    private function is_ip_blocked($ip) {
+        global $wpdb;
+        $blocked_table = $wpdb->prefix . 'quiz_master_blocked_ips';
+        
+        $blocked = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $blocked_table WHERE ip_address = %s AND blocked_until > %s", 
+            $ip, current_time('mysql')
+        ));
+        
+        return !empty($blocked);
+    }
+    
+    private function has_failed_twice($quiz_id, $ip) {
+        global $wpdb;
+        $results_table = $wpdb->prefix . 'quiz_master_results';
+        $quizzes_table = $wpdb->prefix . 'quiz_master_quizzes';
+        
+        $quiz = $wpdb->get_row($wpdb->prepare(
+            "SELECT pass_mark FROM $quizzes_table WHERE quiz_id = %d", $quiz_id
+        ));
+        
+        if (!$quiz) return false;
+        
+        $fail_count = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $results_table 
+            WHERE quiz_id = %d AND user_ip = %s AND score < %d
+            AND end_time > DATE_SUB(%s, INTERVAL 24 HOUR)",
+            $quiz_id, $ip, $quiz->pass_mark, current_time('mysql')
+        ));
+        
+        return $fail_count >= 2;
+    }
+    
+    private function block_ip($ip, $reason = '') {
+        global $wpdb;
+        $blocked_table = $wpdb->prefix . 'quiz_master_blocked_ips';
+        
+        $blocked_until = date('Y-m-d H:i:s', strtotime('+24 hours'));
+        
+        $wpdb->replace($blocked_table, array(
+            'ip_address' => $ip,
+            'reason' => sanitize_text_field($reason),
+            'blocked_until' => $blocked_until
+        ));
+    }
+}

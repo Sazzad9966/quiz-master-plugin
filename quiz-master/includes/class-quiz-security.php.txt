@@ -1,0 +1,31 @@
+class Quiz_Master_Security {
+    public function __construct() {
+        add_action('init', array($this, 'check_for_blocked_ips'));
+        add_action('quiz_master_failed_twice', array($this, 'handle_failed_attempts'), 10, 2);
+    }
+    
+    public function check_for_blocked_ips() {
+        if (is_admin()) return;
+        
+        $ip = $this->get_user_ip();
+        if ($this->is_ip_blocked($ip)) {
+            wp_die(__('You are temporarily blocked from taking quizzes. Please try again later.', 'quiz-master'));
+        }
+    }
+    
+    public function handle_failed_attempts($quiz_id, $ip) {
+        $this->block_ip($ip, 'Failed quiz twice');
+    }
+    
+    private function get_user_ip() {
+        // Same implementation as in other classes
+    }
+    
+    private function is_ip_blocked($ip) {
+        // Same implementation as in other classes
+    }
+    
+    private function block_ip($ip, $reason = '') {
+        // Same implementation as in other classes
+    }
+}
